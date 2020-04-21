@@ -1,0 +1,32 @@
+{
+  "name": "bulk-async",
+  "version": "0.0.1",
+  "description": "Run asynchronous methods as quickly as possible based on the settings",
+  "main": "index.js",
+  "devDependencies": {
+    "jsdocs": "^1.0.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/felipesdias/bulk-async.git"
+  },
+  "keywords": [
+    "async",
+    "promisse",
+    "bulk",
+    "fast",
+    "callback",
+    "module",
+    "utility",
+    "configurable"
+  ],
+  "author": "Felipe de Souza Dias <felipe.s.dias@outlook.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/felipesdias/bulk-async/issues"
+  },
+  "homepage": "https://github.com/felipesdias/bulk-async#readme"
+}
