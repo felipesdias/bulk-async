@@ -1,10 +1,3 @@
-'use strict';
-
-/**
- * The Options is responsible for behavior of the methods
- * @typedef {Object} Verbose
- */
-
 /**
  * The Options is responsible for behavior of the methods
  * @typedef {Object} Options
@@ -16,55 +9,64 @@
  * @property {Verbose} [verbose] - Sleep when function fail
  */
 
- function sleep(timestamp) {
+function sleep(timestamp) {
+    if (timestamp <= 0)
+        return;
+
     return new Promise(resolve => {
         setTimeout(resolve, timestamp);
     });
  }
 
-async function processItem(callback, args, config) {
-    if (config.stopProcess)
-        return null;
-
-    let cont = 0;
-    while (cont <= config.retry) {
-        try {
-            return await callback(args);
-        } catch (error) {
-            if (config.onError) {
-                await config.onError({args, retry: cont, error});
-            }
-
-            if (cont === config.retry && !config.ignoreExceptions) {
-                config.stopProcess = true;
-                throw error;
-            }
-            cont++;
-
-            await sleep(config.sleepOnRetry);
-        }
+function* nextArgument(collection) {
+    for(let i=0; i<collection.length; i++) {
+        yield {
+            index: i,
+            args: collection[i]
+        };
     }
-
-    return null;
 }
 
-async function nextItem(control, id, resolve, reject) {
-    if (control.config.stopProcess)
-        resolve();
+async function executor(executorId, callback, argumentsController, config, finalResult) {
+    for(let item = argumentsController.next(); !item.done; item = argumentsController.next()) {
+        let cont = 0;
 
-    if (control.current < control.max && !control.config.stopProcess) {
-        const idx = control.current;
-        control.current++;
-        try {
-            const result = await processItem(control.callback, control.collection[idx], control.config);
-            if (control.config.returnValue)
-                control.results[idx] = result;
-            nextItem(control, id, resolve, reject);
-        } catch (e) {
-            reject(e);
+        while (cont <= config.retry) {
+            if (config.$stopProcess)
+                return;
+
+            try {
+                const result = await callback(item.value.args);
+
+                if (config.returnValue)
+                    finalResult[item.index] = { status: 'OK', value: result, retries: cont };
+
+                break;
+            } catch(e) {
+                const startExceptionTime = new Date().getTime();
+
+                if (config.onError) {
+                    await config.onError({args, retry: cont, error});
+                }
+    
+                if (cont === config.retry) {
+                    cont++;
+
+                    if (config.ignoreExceptions) {
+                        finalResult[item.index] = { status: 'ERROR', value: e, retries: cont };
+                    } 
+                    else {
+                        config.$stopProcess = true;
+                        config.$errorStopProcess = e;
+                        throw e;
+                    }
+                } else {
+                    cont++;
+                    const endExceptionTime = new Date().getTime();   
+                    await sleep(config.sleepOnRetry - endExceptionTime - startExceptionTime);
+                }
+            }
         }
-    } else {
-        resolve();
     }
 }
 
@@ -81,6 +83,7 @@ async function fastBatchAsync(collection, callback, options) {
         retry: 0,
         ignoreExceptions: false,
         sizeLimit: collection.length,
+        verbose: {},
         ...options
     }
 
@@ -92,25 +95,22 @@ async function fastBatchAsync(collection, callback, options) {
     config.sizeLimit = Math.min(collection.length, config.sizeLimit);
 
     const promisses = [];
-    const control = {
-        current: 0,
-        max: collection.length,
-        results: {},
-        callback,
-        collection,
-        config
-    };
+    const finalResult = {};
+
+    const argumentsController = nextArgument(collection);
 
     for (let i = 0; i < config.sizeLimit; i++) {
-        promisses.push(new Promise((resolve, reject) => {
-            nextItem(control, i, resolve, reject);
-        }));
+        promisses.push(executor(i, callback, argumentsController, config, finalResult));
     }
 
-    await Promise.all(promisses);
+    try {
+        await Promise.all(promisses);
+    } catch (e) {
+        throw e;
+    }
 
     if (config.returnValue)
-        return Object.keys(control.results).map(x => control.results[x]);
+        return Object.keys(finalResult).sort((a, b) => Number(a)-Number(b)).map(x => finalResult[x]);
 }
 
 
@@ -153,4 +153,3 @@ module.exports = {
     map,
     forEach
 }
-
