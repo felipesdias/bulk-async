@@ -1,5 +1,4 @@
 const fastPromisses = require('./index');
-const fastPromisses2 = require('./index2');
 
 // function sleep(timestamp) {
 //     if (timestamp <= 0)
@@ -47,12 +46,12 @@ Array.prototype.shuffle = function () {
 };
 
 
-const n = 1300;
-const p = 50;
+const n = 50;
+const p = 10;
 const np = Math.ceil(n / p);
 
-const a = Array(n).fill(0).map((_, b) => b).shuffle();
-const aSorted = Array(n).fill(0).map((_, b) => b);
+const a = Array(n).fill(0).map((_, b) => random(1500)).shuffle();
+const aSorted = a.map(x => x).sort((a, b) => a-b);
 
 
 const b = [];
@@ -71,18 +70,13 @@ for (let i = 0; i < np; i++) {
 
 (async () => {
     console.time('speed up 1');
-    const g = await fastPromisses.forEach(a, async (t) => {
+    const g = await fastPromisses.map(a, async (t) => {
+        // if (Math.random() < 0.5)
+        //     throw "bla";
         await sleep(t);
         return t;
-    }, { sizeLimit: p, retry: 3, ignoreExceptions: true });
+    }, { sizeLimit: p, retry: 3, ignoreExceptions: true, sleepOnRetry: 0, windowSize: 1000 });
     console.timeEnd('speed up 1');
-
-    console.time('speed up 2');
-    await fastPromisses2.forEach(a, async (t) => {
-        await sleep(t);
-        return t;
-    }, { sizeLimit: p, retry: 3, ignoreExceptions: true });
-    console.timeEnd('speed up 2');
 
     console.time('batch sorted 1');
     const oiSorted = [];
