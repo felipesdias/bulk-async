@@ -1,9 +1,4 @@
-'use strict';
-
-/**
- * The Options is responsible for behavior of the methods
- * @typedef {Object} Verbose
- */
+const { Queue } = require('./queue');
 
 /**
  * The Options is responsible for behavior of the methods
@@ -11,60 +6,117 @@
  * @property {Number} [retry=0] - Maximum number of retries
  * @property {Boolean} [ignoreExceptions=false] - Ignore exceptions and 
  * @property {Number} [sizeLimit=max] - Maximum executions at the same time
+ * @property {Number} [windowSize] - Maximum executions in window of miliseconds
  * @property {Number} [sleepOnRetry=0] - Sleep when function fail
  * @property {Function|Promise} [onError] - Sleep when function fail
  * @property {Verbose} [verbose] - Sleep when function fail
  */
 
- function sleep(timestamp) {
+function sleep(timestamp) {
+    if (timestamp <= 0)
+        return;
+
     return new Promise(resolve => {
         setTimeout(resolve, timestamp);
     });
- }
+}
 
-async function processItem(callback, args, config) {
-    if (config.stopProcess)
-        return null;
+const initDate = new Date().getTime();
 
-    let cont = 0;
-    while (cont <= config.retry) {
-        try {
-            return await callback(args);
-        } catch (error) {
-            if (config.onError) {
-                await config.onError({args, retry: cont, error});
-            }
+/**
+ * @name nextArgument
+ * @param {Array} collection - Collection of parameters
+ * @param {Options} [options] - Behavior options
+ */
+async function* nextArgument(collection, options) {
+    const items = [];
+    const queue = new Queue();
 
-            if (cont === config.retry && !config.ignoreExceptions) {
-                config.stopProcess = true;
-                throw error;
-            }
-            cont++;
+    let elementsOnRetry = 0;
 
-            await sleep(config.sleepOnRetry);
+    const retry = async (item) => {
+        if (item.retries < options.retry) {
+            elementsOnRetry++;
+
+            if (options.sleepOnRetry > 0)
+                await sleep(options.sleepOnRetry);
+
+            items.push({
+                ...item,
+                retries: item.retries + 1
+            });
+
+            elementsOnRetry--;
         }
     }
 
-    return null;
+    for (let i = collection.length - 1; i >= 0; i--) {
+        items.push({
+            index: i,
+            args: collection[i],
+            retry,
+            retries: 0
+        });
+    }
+
+
+    while (items.length > 0 || elementsOnRetry > 0) {
+        if (items.length > 0) {
+            if (options.windowSize) {
+                if (queue.size >= options.sizeLimit) {
+                    const oldest = queue.dequeue();
+
+                    const timeToSleep = options.windowSize - (new Date().getTime() - oldest);
+
+                    if (timeToSleep > 0)
+                        await sleep(timeToSleep);
+                }
+
+                queue.enqueue(new Date().getTime());
+            }
+
+            const item = items.pop();
+
+            yield item;
+        }
+        else
+            await sleep(10);
+    }
 }
 
-async function nextItem(control, id, resolve, reject) {
-    if (control.config.stopProcess)
-        resolve();
+async function executor(executorId, callback, argumentsController, config, finalResult) {
+    for (let item = await argumentsController.next(); !item.done; item = await argumentsController.next()) {
+        item = item.value;
 
-    if (control.current < control.max && !control.config.stopProcess) {
-        const idx = control.current;
-        control.current++;
+        console.log(executorId, ":", item.index, item.args, new Date().getTime() - initDate);
+
+        if (config.$stopProcess)
+            return;
+
         try {
-            const result = await processItem(control.callback, control.collection[idx], control.config);
-            if (control.config.returnValue)
-                control.results[idx] = result;
-            nextItem(control, id, resolve, reject);
+            const result = await callback(item.args);
+
+            if (config.returnValue)
+                finalResult[item.index] = { status: 'OK', value: result, retries: item.retries };
+
         } catch (e) {
-            reject(e);
+            if (config.onError) {
+                await config.onError({ args: item.args, retries: item.retries, error: e });
+            }
+
+            if (item.retries + 1 === config.retry) {
+                if (config.ignoreExceptions) {
+                    finalResult[item.index] = { status: 'ERROR', value: e, retries: item.retries };
+                }
+                else {
+                    config.$stopProcess = true;
+                    config.$errorStopProcess = e;
+                    throw e;
+                }
+            } else {
+                item.retry(item);
+            }
         }
-    } else {
-        resolve();
     }
 }
 
@@ -81,6 +133,7 @@ async function fastBatchAsync(collection, callback, options) {
         retry: 0,
         ignoreExceptions: false,
         sizeLimit: collection.length,
+        verbose: {},
         ...options
     }
 
@@ -92,25 +145,18 @@ async function fastBatchAsync(collection, callback, options) {
     config.sizeLimit = Math.min(collection.length, config.sizeLimit);
 
     const promisses = [];
-    const control = {
-        current: 0,
-        max: collection.length,
-        results: {},
-        callback,
-        collection,
-        config
-    };
+
+    const argumentsController = nextArgument(collection, options);
+
+    const finalResult = Array(collection.length);
 
     for (let i = 0; i < config.sizeLimit; i++) {
-        promisses.push(new Promise((resolve, reject) => {
-            nextItem(control, i, resolve, reject);
-        }));
+        promisses.push(executor(i, callback, argumentsController, config, finalResult));
     }
 
     await Promise.all(promisses);
 
-    if (config.returnValue)
-        return Object.keys(control.results).map(x => control.results[x]);
+    return finalResult;
 }
 
 
@@ -153,4 +199,3 @@ module.exports = {
     map,
     forEach
 }
-
