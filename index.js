@@ -88,7 +88,9 @@ async function executor(executorId, callback, argumentsController, config, final
     for (let item = await argumentsController.next(); !item.done; item = await argumentsController.next()) {
         item = item.value;
 
-        console.log(executorId, ":", item.index, item.args, new Date().getTime() - initDate);
+        if (config.verbose) {
+            console.log(executorId, ":", item.index, item.args, new Date().getTime() - initDate);
+        }
 
         if (config.$stopProcess)
             return;

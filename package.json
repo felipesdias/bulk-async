@@ -1,6 +1,6 @@
 {
   "name": "bulk-async",
-  "version": "0.0.1",
+  "version": "1.0.1",
   "description": "Run asynchronous methods as quickly as possible based on the settings",
   "main": "index.js",
   "devDependencies": {
