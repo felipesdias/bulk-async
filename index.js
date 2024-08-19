@@ -88,7 +88,7 @@ async function executor(executorId, callback, argumentsController, config, final
     for (let item = await argumentsController.next(); !item.done; item = await argumentsController.next()) {
         item = item.value;
 
-        if (config.verbose) {
+        if (config.verbose.log) {
             console.log(executorId, ":", item.index, item.args, new Date().getTime() - initDate);
         }
 
